@@ -1181,7 +1181,7 @@ const fmtL = n => __nfPtBR.format(Math.round((n||0)*100)/100);
 const fmtDate = iso => iso ? new Date(iso+'T00:00:00').toLocaleDateString('pt-BR') : '—';
 const uid = () => Math.random().toString(36).slice(2,9);
 
-let DB = {"updatedAt":"2026-10-27","items":[],"recipes":[],"resources":[],"orders":[],"plan":[],"motivosParada":[{"id":"mp01","nome":"Troca de Setup / Changeover","tipo":"Programada"},{"id":"mp02","nome":"Manutenção Preventiva","tipo":"Programada"},{"id":"mp03","nome":"Limpeza / CIP","tipo":"Programada"},{"id":"mp04","nome":"Refeição / Intervalo","tipo":"Programada"},{"id":"mp05","nome":"Reunião / Treinamento","tipo":"Programada"},{"id":"mp06","nome":"Sem Programação (ocioso)","tipo":"Programada"},{"id":"mp07","nome":"Quebra de Equipamento (Manutenção Corretiva)","tipo":"Não Programada"},{"id":"mp08","nome":"Falta de Insumo / Matéria-Prima","tipo":"Não Programada"},{"id":"mp09","nome":"Falta de Operador","tipo":"Não Programada"},{"id":"mp10","nome":"Falta de Energia / Utilidades","tipo":"Não Programada"},{"id":"mp11","nome":"Ajuste de Qualidade / Retrabalho","tipo":"Não Programada"},{"id":"mp12","nome":"Espera de Liberação de Qualidade","tipo":"Não Programada"},{"id":"mp13","nome":"Outros","tipo":"Não Programada"}],"paradas":[],"planConfirmed":false,"planConfirmedAt":null,"prioridades":[],"refugos":[],"locaisGranel":[]};
+let DB = {"updatedAt":"2026-10-29","items":[],"recipes":[],"resources":[],"orders":[],"plan":[],"motivosParada":[{"id":"mp01","nome":"Troca de Setup / Changeover","tipo":"Programada"},{"id":"mp02","nome":"Manutenção Preventiva","tipo":"Programada"},{"id":"mp03","nome":"Limpeza / CIP","tipo":"Programada"},{"id":"mp04","nome":"Refeição / Intervalo","tipo":"Programada"},{"id":"mp05","nome":"Reunião / Treinamento","tipo":"Programada"},{"id":"mp06","nome":"Sem Programação (ocioso)","tipo":"Programada"},{"id":"mp07","nome":"Quebra de Equipamento (Manutenção Corretiva)","tipo":"Não Programada"},{"id":"mp08","nome":"Falta de Insumo / Matéria-Prima","tipo":"Não Programada"},{"id":"mp09","nome":"Falta de Operador","tipo":"Não Programada"},{"id":"mp10","nome":"Falta de Energia / Utilidades","tipo":"Não Programada"},{"id":"mp11","nome":"Ajuste de Qualidade / Retrabalho","tipo":"Não Programada"},{"id":"mp12","nome":"Espera de Liberação de Qualidade","tipo":"Não Programada"},{"id":"mp13","nome":"Outros","tipo":"Não Programada"}],"paradas":[],"planConfirmed":false,"planConfirmedAt":null,"prioridades":[],"refugos":[],"locaisGranel":[]};
 
 // itemByCode é chamado milhares de vezes durante a renderização — um índice (Map) evita
 // refazer uma busca linear em todos os itens a cada chamada, o que ficava lento com volumes grandes.
@@ -7674,7 +7674,7 @@ async function ativarModoOnline(){
   ONLINE = true;
   try{
     Sync.backend = (ONLINE_CFG.fake && window.__BACKEND_TESTE) ? window.__BACKEND_TESTE : await criarBackendSupabase(ONLINE_CFG);
-  }catch(e){ Sync.backend = null; ONLINE_ERRO = (e&&e.message)||String(e); }
+  }catch(e){ Sync.backend = null; ONLINE_ERRO = (e&&e.message)||String(e); ONLINE_ERRO_PRONTA = !!(e && e.pronta); }
   // funções do módulo de acesso passam a falar com o servidor (as telas e regras de permissão continuam as mesmas)
   carregarAcesso = async function(){ ACESSO = {versao:1, usuarios:[], log:[]}; };
   gravarAcesso = async function(){ await onlineSalvarPerfis(); };
@@ -7686,7 +7686,7 @@ async function ativarModoOnline(){
   iniciarAcesso = function(){
     return new Promise(async resolve=>{
       __resolverAcesso = resolve; document.body.classList.add('auth-pending');
-      if(!Sync.backend){ onlineMostrarErro('Não foi possível iniciar a conexão com o servidor'+(ONLINE_ERRO?': '+ONLINE_ERRO:'')+'. Verifique a internet e o arquivo de configuração.'); return; }
+      if(!Sync.backend){ onlineMostrarErro(ONLINE_ERRO_PRONTA ? ONLINE_ERRO : 'Não foi possível iniciar a conexão com o servidor'+(ONLINE_ERRO?': '+ONLINE_ERRO:'')+'. Verifique a internet e o arquivo config.js.'); return; }
       await carregarAcesso();
       try{ const perfil = await Sync.backend.iniciarSessao(); if(perfil){ await onlineConcluir(syncClonar(perfil)); return; } }catch(e){}
       onlineMostrarLogin('login');
@@ -7701,7 +7701,7 @@ async function ativarModoOnline(){
   atualizarBarraUsuario = function(){ barraOriginal(); syncRenderStatus(); };
   return true;
 }
-let ONLINE_ERRO = '';
+let ONLINE_ERRO = '', ONLINE_ERRO_PRONTA = false;
 
 /* =========================================================================
    TELA DE USUÁRIOS, SENHAS E BACKUP no modo online
@@ -7867,17 +7867,63 @@ async function onlineDiagnostico(){
    ADAPTADOR SUPABASE — traduz as chamadas do motor de sincronização para o Supabase
    (Auth + Postgres via API + Realtime). Mesma interface do servidor simulado dos testes.
    ========================================================================= */
-const SUPABASE_SDK_URL = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4';   // versão fixa
-
-function carregarSdkSupabase(){
-  if(window.supabase && window.supabase.createClient) return Promise.resolve(window.supabase);
+// A biblioteca vem junto do pacote (supabase.js, na mesma pasta do index.html). Se ela não estiver lá, tenta CDNs públicas.
+const SUPABASE_SDK_FONTES = [
+  {nome:'arquivo supabase.js (junto do index.html)', url:'supabase.js'},
+  {nome:'CDN jsDelivr', url:'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js'},
+  {nome:'CDN unpkg', url:'https://unpkg.com/@supabase/supabase-js@2.45.4/dist/umd/supabase.js'},
+];
+function carregarScript(url){
   return new Promise((resolve, reject)=>{
-    const s = document.createElement('script'); s.src = SUPABASE_SDK_URL; s.async = true;
-    s.onload = ()=> (window.supabase && window.supabase.createClient) ? resolve(window.supabase) : reject(new Error('a biblioteca do Supabase carregou, mas não foi reconhecida'));
-    s.onerror = ()=> reject(new Error('não foi possível carregar a biblioteca do Supabase (sem internet ou bloqueio de rede)'));
+    const s = document.createElement('script'); s.src = url; s.async = true;
+    s.onload = resolve; s.onerror = ()=>{ s.remove(); reject(new Error('falhou')); };
     document.head.appendChild(s);
   });
 }
+async function carregarSdkSupabase(){
+  if(window.supabase && window.supabase.createClient) return window.supabase;
+  const falhas = [];
+  for(const f of SUPABASE_SDK_FONTES){
+    try{ await carregarScript(f.url); if(window.supabase && window.supabase.createClient) return window.supabase; falhas.push(f.nome+' (carregou, mas não foi reconhecida)'); }
+    catch(e){ falhas.push(f.nome); }
+  }
+  const err = new Error('Não foi possível carregar a biblioteca de conexão (Supabase). Tentei: '+falhas.join('; ')+'. Confirme que o arquivo supabase.js foi enviado ao GitHub junto com o index.html e que a rede não bloqueia scripts externos.');
+  err.pronta = true; throw err;
+}
+
+/* ---------- conferência da configuração (config.js) ---------- */
+function supabaseNormalizarConfig(cfg){
+  const avisos = []; let url = String((cfg && cfg.supabaseUrl) || '').trim(); let key = String((cfg && cfg.supabaseAnonKey) || '').trim().replace(/^['"`]+|['"`]+$/g, '');
+  if(!url || !key) return {vazio:true};
+  if(!/^https?:\/\//i.test(url)){ url = 'https://'+url; avisos.push('Acrescentei "https://" no começo da URL.'); }
+  const antes = url;
+  url = url.replace(/\/+$/, '').replace(/\/(rest|auth|realtime|storage|functions)\/v1.*$/i, '').replace(/\/+$/, '');
+  if(url!==antes) avisos.push('Removi o final da URL (barra ou "/rest/v1"): ela deve terminar em ".supabase.co".');
+  try{                                                                            // a chave secreta NUNCA pode ficar no navegador
+    const p = JSON.parse(atob(key.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+    if(p && p.role==='service_role') return {erro:'A chave colocada no config.js é a "service_role" (a chave SECRETA do Supabase). Ela nunca pode ficar numa página pública. Troque pela chave "anon public" (Project Settings → API) e, por segurança, gere uma nova service_role no painel, pois a atual foi exposta.'};
+  }catch(e){ /* chave em outro formato (ex.: sb_publishable_…): segue */ }
+  if(!/^https:\/\/[a-z0-9-]+\.supabase\.(co|in)$/i.test(url)) avisos.push('A URL não parece ser de um projeto do Supabase (o formato é https://xxxxxxxxxxxx.supabase.co).');
+  if(!/^eyJ/.test(key) && !/^sb_publishable_/.test(key)) avisos.push('A chave não parece a "anon public" (ela costuma começar com "eyJ").');
+  return {url, key, avisos};
+}
+// confere se o endereço responde (qualquer resposta HTTP prova que a rede e a URL estão certas)
+async function supabaseSondarServidor(url, key){
+  try{
+    const r = await fetch(url+'/auth/v1/settings', {headers:{apikey:key}});
+    if(r.status===401 || r.status===403) return {ok:false, tipo:'chave', status:r.status};
+    if(r.status>=500) return {ok:false, tipo:'servidor', status:r.status};
+    return {ok:true, status:r.status};
+  }catch(e){ return {ok:false, tipo:'rede', erro:String((e&&e.message)||e)}; }
+}
+function supabaseExplicarSonda(sonda, url){
+  const host = url.replace(/^https?:\/\//,'');
+  if(sonda.tipo==='chave') return `O servidor ${host} respondeu, mas recusou a chave do config.js. Confira se você copiou a chave "anon public" completa (Project Settings → API) e se ela é do MESMO projeto da URL.`;
+  if(sonda.tipo==='servidor') return `O servidor ${host} respondeu com erro ${sonda.status}. Se o projeto estiver pausado, abra o painel do Supabase e clique em "Restore project"; se foi criado agora, aguarde alguns minutos.`;
+  const offline = (typeof navigator!=='undefined' && navigator.onLine===false);
+  return (offline ? 'Este computador está sem internet. ' : `Este navegador não conseguiu falar com o servidor ${host}. `) + 'Confira, nesta ordem: (1) a URL no config.js — deve ser exatamente como no painel do Supabase (Project Settings → API → Project URL), sem "/" no final; (2) se o projeto não está pausado (painel do Supabase); (3) se um antivírus, bloqueador de anúncios, VPN ou rede da empresa bloqueia "supabase.co" — teste em outra rede ou no celular.';
+}
+
 // mensagens do Supabase em português simples
 function supabaseMensagem(e){
   const m = String((e && (e.message || e.error_description || e.msg)) || e || '');
@@ -7893,13 +7939,21 @@ function supabaseMensagem(e){
 }
 
 async function criarBackendSupabase(cfg){
+  const n = supabaseNormalizarConfig(cfg);
+  if(n.erro){ const e = new Error(n.erro); e.pronta = true; throw e; }
+  if(n.avisos && n.avisos.length) console.warn('config.js:', n.avisos.join(' '));
   const sdk = await carregarSdkSupabase();
-  const client = sdk.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
+  if(!cfg.semSonda && typeof fetch==='function'){                 // antes de mostrar a tela de login, confirma que o servidor está alcançável
+    const sonda = await supabaseSondarServidor(n.url, n.key);
+    if(!sonda.ok){ const e = new Error(supabaseExplicarSonda(sonda, n.url)); e.pronta = true; throw e; }
+  }
+  const client = sdk.createClient(n.url, n.key, {
     auth:{persistSession:true, autoRefreshToken:true, detectSessionInUrl:false},
     realtime:{params:{eventsPerSecond:20}},
   });
   const perfilDe = r => ({id:r.id, usuario:r.email, nome:r.nome, admin:!!r.admin, ativo:!!r.ativo, permissoes:r.permissoes||{}, campos:r.campos||{}, travas:r.travas||{},
     criadoEm:Date.parse(r.criado_em)||Date.now(), ultimoAcesso:r.ultimo_acesso ? Date.parse(r.ultimo_acesso) : null});
+  const comRede = async (err)=>{ if(!/failed to fetch|networkerror|network request failed|fetch failed/i.test(String((err&&err.message)||err))) return supabaseMensagem(err); if(cfg.semSonda) return supabaseMensagem(err); return supabaseExplicarSonda(await supabaseSondarServidor(n.url, n.key), n.url); };
   const erro = e => { const x = new Error(supabaseMensagem(e)); x.code = (e && (e.code==='42501' || /sem_permissao/.test(e.message||''))) ? 'sem_permissao' : (e && e.code); return x; };
 
   async function meuPerfil(userId){
@@ -7925,12 +7979,12 @@ async function criarBackendSupabase(cfg){
     },
     async entrar(email, senha){
       const {data, error} = await client.auth.signInWithPassword({email, password:senha});
-      if(error) return {erro:supabaseMensagem(error)};
+      if(error) return {erro: await comRede(error)};
       const p = await meuPerfil(data.user.id); await registrarAcesso(); return {perfil:p};
     },
     async criarConta(nome, email, senha){
       const {data, error} = await client.auth.signUp({email, password:senha, options:{data:{nome}}});
-      if(error) return {erro:supabaseMensagem(error)};
+      if(error) return {erro: await comRede(error)};
       if(!data.session) return {confirmarEmail:true};         // o projeto exige confirmar o e-mail antes de entrar
       return {perfil: await meuPerfil(data.user.id)};
     },

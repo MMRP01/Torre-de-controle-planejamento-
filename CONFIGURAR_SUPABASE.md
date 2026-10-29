@@ -44,11 +44,13 @@ window.MENZOIL_CONFIG = {
   supabaseAnonKey: 'eyJhbGciOi...'
 };
 ```
-> A chave `anon` é pública por desenho — pode ir para o GitHub. **Nunca** use a chave `service_role` aqui.
+> A chave `anon` é pública por desenho — pode ir para o GitHub. **Nunca** use a chave `service_role` aqui (a ferramenta recusa e avisa).
+> A ferramenta corrige sozinha erros comuns da URL (falta de `https://`, espaços, barra no final, `/rest/v1`), mas confira sempre se ela é a **Project URL** do painel.
 
 ## 6. Publicar no GitHub Pages
-1. Crie um repositório no GitHub e suba os arquivos: `index.html`, `config.js`, `README.md`, `.nojekyll`
-   (e, se quiser guardar, as pastas `supabase/` e `docs/`).
+1. Crie um repositório no GitHub e suba **todos** os arquivos do pacote: `index.html`, `config.js`, **`supabase.js`**,
+   `README.md`, `.nojekyll` (e, se quiser guardar, as pastas `supabase/` e `docs/`).
+   > O `supabase.js` é a biblioteca de conexão (108 KB). **Sem ele no repositório a ferramenta não consegue entrar online.**
 2. **Settings → Pages → Deploy from a branch → `main` / (root)**. Em cerca de 1 minuto o site abre.
 3. Domínio próprio (opcional): *Settings → Pages → Custom domain* + um registro CNAME no seu provedor de DNS.
    Depois, atualize o **Site URL** do passo 3.3.
@@ -93,8 +95,11 @@ Só depois do passo 7 (administrador criado) as outras pessoas podem usar.
 ## Problemas comuns
 | O que aparece | Causa provável | O que fazer |
 |---|---|---|
-| "Não foi possível carregar a biblioteca do Supabase" | Sem internet, bloqueio de rede, ou o endereço da biblioteca mudou | Teste outra rede. Se persistir, veja a seção "Biblioteca do Supabase" abaixo |
-| Tela de login pede e-mail, mas nada acontece | `config.js` em branco ou com a URL errada | Confira a URL e a chave `anon` no passo 5 |
+| "Sem conexão com o servidor… não conseguiu falar com o servidor xxxx.supabase.co" | A **URL do `config.js` está errada** (a causa mais comum), o projeto está **pausado**, ou um bloqueador/antivírus/rede da empresa bloqueia `supabase.co` | Compare a URL com **Project Settings → API → Project URL**. Abra essa URL no navegador: se não carregar, é rede ou projeto pausado (*Restore project*). Teste pelo celular |
+| "O servidor respondeu, mas recusou a chave" | Chave `anon` copiada incompleta, ou de outro projeto | Copie de novo a chave **anon public** (a longa, começa com `eyJ`) do mesmo projeto da URL |
+| "A chave colocada no config.js é a service_role" | Foi colada a chave **secreta** | Troque pela **anon public** e, por segurança, gere uma nova `service_role` no painel (a antiga foi exposta) |
+| "Não foi possível carregar a biblioteca de conexão" | O `supabase.js` não foi enviado ao GitHub (ou rede bloqueia CDNs) | Suba o `supabase.js` na mesma pasta do `index.html` |
+| A tela abre, mas sem login online (parece o modo antigo) | `config.js` em branco, ou o arquivo errado foi enviado | Abra `https://SEU-SITE/config.js` no navegador: deve mostrar a sua URL e chave |
 | "Não foi possível ler os dados" no teste | O `schema.sql` não foi executado por inteiro, ou URL/chave de outro projeto | Rode o `schema.sql` de novo; confira o `config.js` |
 | "Tempo real" falha no teste | Tabelas fora da publicação, ou rede da empresa bloqueia WebSocket | Passo 4; teste em outra rede (celular) |
 | Conta criada, mas "Aguardando liberação" | É o esperado | O administrador libera em Usuários e Permissões |
@@ -104,11 +109,9 @@ Só depois do passo 7 (administrador criado) as outras pessoas podem usar.
 | Projeto "pausado" | Plano gratuito pausa após cerca de 1 semana sem uso | No painel do Supabase, clique em *Restore project* |
 
 ## Biblioteca do Supabase
-A ferramenta carrega a biblioteca do Supabase (`supabase-js`, versão fixa) de um CDN público (jsDelivr). Se esse endereço
-não carregar na sua rede, baixe o arquivo da biblioteca (o pacote `@supabase/supabase-js`, arquivo `dist/umd/supabase.js`),
-salve-o na mesma pasta como `supabase.js` e, no `index.html`, acrescente a linha
-`<script src="supabase.js"></script>` **antes** de `<script src="config.js"></script>`. A ferramenta usa a biblioteca já
-carregada e não tenta buscá-la no CDN.
+O arquivo `supabase.js` que acompanha o pacote é a biblioteca oficial do Supabase (versão 2.45.4). A ferramenta a carrega
+dele; só se o arquivo não estiver na pasta é que tenta baixá-la de CDNs públicas (jsDelivr e unpkg). Se aparecer
+"Não foi possível carregar a biblioteca de conexão", confira se o `supabase.js` foi enviado ao GitHub, na mesma pasta do `index.html`.
 
 ## Backup, custo e segurança
 - **Backup:** no plano gratuito não há backup automático com retorno no tempo. Use **Importação de Dados →

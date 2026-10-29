@@ -21,6 +21,7 @@ Siga o guia **[docs/CONFIGURAR_SUPABASE.md](docs/CONFIGURAR_SUPABASE.md)** (20 a
 |---|---|
 | `index.html` | a ferramenta inteira (sem dados) |
 | `config.js` | URL e chave pública do Supabase (em branco = modo local, dados só neste navegador) |
+| `supabase.js` | biblioteca de conexão com o Supabase (**precisa subir junto com o `index.html`**) |
 | `supabase/schema.sql` | tabelas, regras de acesso e gravação com controle de conflito (rodar no SQL Editor) |
 | `docs/CONFIGURAR_SUPABASE.md` | passo a passo e solução de problemas |
 
