@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diagnóstico de conexão — Torre de Controle de Produção</title>
+<style>
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:820px;margin:0 auto;padding:18px;color:#1f2328;background:#f4f5f7}
+  h1{font-size:20px;margin:6px 0 4px} p{line-height:1.5;margin:8px 0}
+  button{font:inherit;font-weight:700;padding:10px 16px;border-radius:8px;border:1px solid #c10016;background:#c10016;color:#fff;cursor:pointer;margin:6px 8px 6px 0}
+  button.sec{background:#fff;color:#1f2328;border-color:#aaa} button:disabled{opacity:.5;cursor:wait}
+  .passo{background:#fff;border:1px solid #ddd;border-left:6px solid #bbb;border-radius:8px;padding:10px 12px;margin:8px 0}
+  .passo.ok{border-left-color:#2e7d32} .passo.falha{border-left-color:#c10016;background:#fff6f6} .passo.aviso{border-left-color:#e0a800}
+  .passo b{display:block} .det{font-size:13px;color:#444;margin-top:4px;white-space:pre-wrap;word-break:break-word}
+  .dica{font-size:13px;margin-top:6px;padding:6px 8px;background:#fff3cd;border-radius:6px}
+  #resumo{font-size:16px;font-weight:700;margin:14px 0;padding:12px;border-radius:8px;background:#e8f5e9}
+  #resumo.ruim{background:#ffe5e8} pre{background:#fff;border:1px solid #ddd;border-radius:8px;padding:10px;font-size:12px;white-space:pre-wrap;word-break:break-word}
+</style>
+<script src="config.js"></script>
+</head>
+<body>
+<h1>Diagnóstico de conexão</h1>
+<p>Esta página testa, passo a passo, se <strong>este computador ou celular</strong> consegue usar a Torre de Controle de Produção online.
+Clique em <strong>Executar</strong>, espere terminar (até 20 segundos) e depois em <strong>Copiar relatório</strong> para enviar a quem cuida da ferramenta.
+Nenhuma senha é pedida e a chave é mostrada de forma abreviada.</p>
+<button id="go">Executar diagnóstico</button><button id="copiar" class="sec" disabled>Copiar relatório</button>
+<div id="resumo" style="display:none"></div>
+<div id="saida"></div>
+<h3 style="margin-top:22px">Relatório (texto para copiar)</h3>
+<pre id="relatorio">(ainda não executado)</pre>
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const passos = [];
+  const esperar = (ms)=>new Promise(r=>setTimeout(r,ms));
+  const comTempo = (p, ms, rotulo)=>Promise.race([p, new Promise((_,rej)=>setTimeout(()=>rej(new Error(rotulo||'tempo esgotado')), ms))]);
+  const mascarar = k => !k ? '(vazia)' : (k.length>16 ? k.slice(0,8)+'…'+k.slice(-4) : k.slice(0,4)+'…') + ' ('+k.length+' caracteres)';
+  function registrar(nome, estado, det, dica){
+    passos.push({nome, estado, det:det||'', dica:dica||''});
+    const d = document.createElement('div'); d.className = 'passo '+estado;
+    d.innerHTML = '<b>'+(estado==='ok'?'✓ ':estado==='falha'?'✗ ':'⚠ ')+nome.replace(/</g,'&lt;')+'</b>' + (det?'<div class="det">'+det.replace(/</g,'&lt;')+'</div>':'') + (dica?'<div class="dica"><strong>O que fazer:</strong> '+dica.replace(/</g,'&lt;')+'</div>':'');
+    $('saida').appendChild(d);
+  }
+  const base = location.href.replace(/[#?].*$/, '').replace(/[^/]*$/, '');
+  function normalizar(cfg){
+    let url = String((cfg&&cfg.supabaseUrl)||'').trim(), key = String((cfg&&cfg.supabaseAnonKey)||'').trim().replace(/^['"`]+|['"`]+$/g,'');
+    if(!url||!key) return {vazio:true};
+    if(!/^https?:\/\//i.test(url)) url = 'https://'+url;
+    url = url.replace(/\/+$/,'').replace(/\/(rest|auth|realtime|storage|functions)\/v1.*$/i,'').replace(/\/+$/,'');
+    let papel = '?'; try{ papel = JSON.parse(atob(key.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).role||'?'; }catch(e){}
+    return {url, key, papel};
+  }
+  async function executar(){
+    $('go').disabled = true; $('copiar').disabled = true; $('saida').innerHTML = ''; passos.length = 0; $('resumo').style.display = 'none';
+    // 1) ambiente
+    registrar('1. Este aparelho e esta página', location.protocol==='https:' || location.protocol==='file:' ? 'ok' : 'aviso',
+      'Página: '+location.href+'\nProtocolo: '+location.protocol+'\nNavegador: '+navigator.userAgent+'\nInternet (segundo o navegador): '+(navigator.onLine?'sim':'NÃO')+'\nHora do aparelho: '+new Date().toString()+'\nIdioma: '+navigator.language,
+      location.protocol==='http:' ? 'A página está em http (sem cadeado). Use o endereço https do GitHub Pages.' : '');
+    // 2) arquivos publicados
+    let build = '?', cfgTxt = '';
+    try{
+      const r = await comTempo(fetch(base+'index.html?t='+Date.now(), {cache:'no-store'}), 10000, 'index.html demorou demais');
+      const t = await r.text(); const m = t.match(/APP_BUILD\s*=\s*'([^']+)'/); build = m ? m[1] : '(versão antiga: sem carimbo)';
+      registrar('2a. index.html publicado', r.ok ? 'ok' : 'falha', 'Status '+r.status+' · versão da ferramenta: '+build+' · '+Math.round(t.length/1024)+' KB', r.ok ? '' : 'O arquivo index.html não está no endereço do site.');
+    }catch(e){ registrar('2a. index.html publicado','falha', String(e.message||e), 'Não foi possível ler o index.html deste site.'); }
+    try{
+      const r = await comTempo(fetch(base+'config.js?t='+Date.now(), {cache:'no-store'}), 10000, 'config.js demorou demais'); cfgTxt = await r.text();
+      const preenchido = /supabaseUrl:\s*'[^']+'/.test(cfgTxt) && /supabaseAnonKey:\s*'[^']+'/.test(cfgTxt);
+      registrar('2b. config.js publicado', r.ok && preenchido ? 'ok' : 'falha', 'Status '+r.status+' · '+(preenchido?'tem URL e chave preenchidas':'URL e/ou chave EM BRANCO'),
+        !r.ok ? 'O config.js não foi enviado ao GitHub (erro '+r.status+'). Suba o arquivo.' : (!preenchido ? 'O config.js que está no GitHub está em branco. Edite-o no GitHub (ícone de lápis), preencha a URL e a chave e salve (Commit).' : ''));
+    }catch(e){ registrar('2b. config.js publicado','falha', String(e.message||e), 'Não foi possível ler o config.js deste site.'); }
+    try{
+      const r = await comTempo(fetch(base+'supabase.js', {method:'HEAD', cache:'no-store'}), 10000, 'supabase.js demorou demais');
+      registrar('2c. supabase.js (biblioteca de conexão) publicado', r.ok ? 'ok' : 'falha', 'Status '+r.status, r.ok ? '' : 'Suba o arquivo supabase.js para o GitHub, na mesma pasta do index.html.');
+    }catch(e){ registrar('2c. supabase.js publicado','falha', String(e.message||e), 'Não foi possível verificar o supabase.js.'); }
+    // 3) configuração carregada por esta página
+    const n = normalizar(window.MENZOIL_CONFIG);
+    if(n.vazio){ registrar('3. Configuração lida pelo navegador','falha','MENZOIL_CONFIG está vazia (o navegador não leu URL e chave).','Provável cache: peça Ctrl+F5 (ou abra em janela anônima). Se continuar, o config.js do GitHub está em branco.'); return finalizar(build); }
+    registrar('3. Configuração lida pelo navegador', n.papel==='service_role' ? 'falha' : 'ok', 'URL do servidor: '+n.url+'\nChave: '+mascarar(n.key)+'\nTipo da chave: '+n.papel,
+      n.papel==='service_role' ? 'Esta é a chave SECRETA. Troque pela "anon public" (Project Settings → API).' : '');
+    // 4) alcance do servidor
+    let alcancou = false, chaveOk = true;
+    for(const [rot, caminho, comChave] of [['4a. Servidor de login responde (com a chave)', '/auth/v1/settings', true], ['4b. Servidor de login responde (sem cabeçalhos extras)', '/auth/v1/health', false]]){
+      const t0 = Date.now();
+      try{
+        const r = await comTempo(fetch(n.url+caminho, comChave ? {headers:{apikey:n.key}} : {}), 10000, 'sem resposta em 10 s');
+        if(r.status===401 || r.status===403){ chaveOk = false; registrar(rot,'falha','O servidor respondeu '+r.status+' (recusou a chave) em '+(Date.now()-t0)+' ms','Copie de novo a chave "anon public" completa, do mesmo projeto da URL.'); alcancou = true; }
+        else if(r.status>=500){ registrar(rot,'falha','O servidor respondeu erro '+r.status+' em '+(Date.now()-t0)+' ms','Provável projeto pausado: no painel do Supabase clique em "Restore project".'); }
+        else{ registrar(rot,'ok','Status '+r.status+' em '+(Date.now()-t0)+' ms'); alcancou = true; }
+      }catch(e){ registrar(rot,'falha', String(e.message||e)+' ('+(Date.now()-t0)+' ms)', 'O navegador não alcançou '+n.url+'. Confira a URL (deve ser a "Project URL" do painel, sem / no final), se o projeto está pausado, e se algum antivírus, bloqueador de anúncios ou VPN bloqueia supabase.co.'); }
+    }
+    if(!alcancou) return finalizar(build);
+    // 5) login
+    try{
+      const r = await comTempo(fetch(n.url+'/auth/v1/token?grant_type=password', {method:'POST', headers:{apikey:n.key,'Content-Type':'application/json'}, body:JSON.stringify({email:'teste-diagnostico@exemplo.com', password:'senha-invalida-123'})}), 10000, 'sem resposta em 10 s');
+      const j = await r.json().catch(()=>({})); const msg = j.error_description || j.msg || j.message || '';
+      if(r.status===400 && /invalid/i.test(msg+JSON.stringify(j))) registrar('5. Serviço de login (Auth)','ok','Respondeu como esperado ("credenciais inválidas" para um e-mail de teste).');
+      else if(r.status===429) registrar('5. Serviço de login (Auth)','aviso','Muitas tentativas (erro 429).','Aguarde alguns minutos e tente de novo.');
+      else if(r.status===401||r.status===403) registrar('5. Serviço de login (Auth)','falha','Recusou a chave ('+r.status+').','Chave incorreta (passo 4).');
+      else registrar('5. Serviço de login (Auth)', r.status<500?'aviso':'falha','Status '+r.status+' — '+String(msg).slice(0,140));
+    }catch(e){ registrar('5. Serviço de login (Auth)','falha',String(e.message||e),'O login não alcançou o servidor (veja o passo 4).'); }
+    // 6) tabelas do banco
+    try{
+      const r = await comTempo(fetch(n.url+'/rest/v1/registros?select=chave&limit=1', {headers:{apikey:n.key, Authorization:'Bearer '+n.key}}), 10000, 'sem resposta em 10 s');
+      const t = await r.text();
+      if(r.status===404 || /PGRST205|Could not find the table|does not exist/i.test(t)) registrar('6. Tabelas do banco (schema.sql)','falha','A tabela "registros" NÃO existe ('+r.status+').','Rode o arquivo supabase/schema.sql inteiro no SQL Editor do Supabase.');
+      else if(r.status===401 || r.status===403 || /42501|permission denied/i.test(t)) registrar('6. Tabelas do banco (schema.sql)','ok','A tabela existe e está protegida (visitante sem login não lê nada: correto). Resposta '+r.status+'.');
+      else if(r.ok) registrar('6. Tabelas do banco (schema.sql)', t.trim()==='[]' ? 'ok' : 'aviso', 'Resposta '+r.status+': '+t.slice(0,80), t.trim()==='[]' ? '' : 'Um visitante sem login conseguiu ler dados! Rode o schema.sql de novo.');
+      else registrar('6. Tabelas do banco (schema.sql)','aviso','Status '+r.status+' — '+t.slice(0,120));
+    }catch(e){ registrar('6. Tabelas do banco (schema.sql)','falha',String(e.message||e)); }
+    // 7) tempo real (WebSocket)
+    try{
+      const wsUrl = n.url.replace(/^http/,'ws')+'/realtime/v1/websocket?apikey='+encodeURIComponent(n.key)+'&vsn=1.0.0';
+      const t0 = Date.now();
+      await comTempo(new Promise((res,rej)=>{ const ws = new WebSocket(wsUrl); ws.onopen = ()=>{ ws.close(); res(); }; ws.onerror = ()=>rej(new Error('o navegador não conseguiu abrir a conexão WebSocket')); }), 8000, 'WebSocket sem resposta em 8 s');
+      registrar('7. Tempo real (WebSocket)','ok','Conexão aberta em '+(Date.now()-t0)+' ms.');
+    }catch(e){ registrar('7. Tempo real (WebSocket)','aviso', String(e.message||e), 'A ferramenta funciona sem isso (atualiza a cada poucos segundos), mas não instantaneamente. Redes e extensões às vezes bloqueiam WebSocket (wss://).'); }
+    finalizar(build);
+  }
+  function finalizar(build){
+    const falhas = passos.filter(p=>p.estado==='falha'), avisos = passos.filter(p=>p.estado==='aviso');
+    const r = $('resumo'); r.style.display = ''; r.className = falhas.length ? 'ruim' : '';
+    r.textContent = falhas.length ? '✗ Encontrei '+falhas.length+' problema(s). O primeiro: '+falhas[0].nome.replace(/^\d\w?\.\s*/,'')+'.' : (avisos.length ? '✓ Conexão funcionando, com '+avisos.length+' aviso(s).' : '✓ Tudo certo: este aparelho consegue usar a ferramenta online.');
+    const linhas = ['RELATÓRIO DE DIAGNÓSTICO — Torre de Controle de Produção','Versão da ferramenta publicada: '+build,'Gerado em: '+new Date().toISOString(),'RESULTADO: '+r.textContent,''];
+    passos.forEach(p=>{ linhas.push('['+(p.estado==='ok'?'OK':p.estado==='falha'?'FALHA':'AVISO')+'] '+p.nome); if(p.det) linhas.push('    '+p.det.replace(/\n/g,'\n    ')); if(p.dica) linhas.push('    >> '+p.dica); });
+    $('relatorio').textContent = linhas.join('\n'); $('go').disabled = false; $('copiar').disabled = false;
+  }
+  $('go').onclick = ()=>executar();
+  $('copiar').onclick = async ()=>{ const t = $('relatorio').textContent; try{ await navigator.clipboard.writeText(t); $('copiar').textContent = 'Copiado ✓'; }catch(e){ const rg = document.createRange(); rg.selectNodeContents($('relatorio')); const s = getSelection(); s.removeAllRanges(); s.addRange(rg); $('copiar').textContent = 'Selecionado: use Ctrl+C'; } setTimeout(()=>{ $('copiar').textContent = 'Copiar relatório'; }, 3000); };
+  window.__executarDiagnostico = executar;
+})();
+</script>
+</body>
+</html>

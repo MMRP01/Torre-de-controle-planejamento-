@@ -7178,6 +7178,7 @@ function init(){
      (quem mexeu em campos diferentes não perde nada; no mesmo campo, vale a última gravação).
    • Cada gravação é avisada em tempo real aos outros navegadores, que atualizam a tela aberta.
    ========================================================================= */
+const APP_BUILD = '2026-10-29.2';   // carimbo da versão (aparece nas telas de entrada/erro e no diagnostico.html: mostra se alguém está com uma cópia antiga)
 const ONLINE_CFG = (typeof window!=='undefined' && window.MENZOIL_CONFIG) || {};
 const SYNC_COLECOES = ['items','recipes','resources','orders','plan','paradas','refugos','locaisGranel','motivosParada','prioridades','removidasComProducao'];
 const SYNC_ESCALARES = ['updatedAt','planConfirmed','planConfirmedAt'];   // viram registros da coleção "config"
@@ -7602,11 +7603,18 @@ async function onlineConcluir(perfil){
   concluirLoginOriginal(USUARIO_ATUAL);
   syncRenderStatus();
 }
+function onlineDetalhesTecnicos(msg){
+  let host = ''; try{ host = String(ONLINE_CFG.supabaseUrl||'').replace(/^https?:\/\//,'').replace(/\/.*$/,''); }catch(e){}
+  return ['Versão da ferramenta: '+APP_BUILD, 'Página: '+location.href, 'Servidor configurado: '+(host||'(nenhum)'), 'Internet (segundo o navegador): '+(navigator.onLine?'sim':'NÃO'),
+    'Hora: '+new Date().toString(), 'Mensagem: '+String(msg).slice(0,400)].join('\n');
+}
 function onlineMostrarErro(msg){
   const ov = document.getElementById('loginOverlay') || document.body.appendChild(Object.assign(document.createElement('div'),{id:'loginOverlay'}));
   ov.style.display = 'flex'; document.body.classList.add('auth-pending');
   ov.innerHTML = `<div class="lg-card"><div class="lg-sub">Torre de Controle de Produção</div><h2>Sem conexão com o servidor</h2><p class="lg-txt">${acessoEsc(msg)}</p>
-    <button class="btn btn-primary lg-btn" onclick="location.reload()">Tentar de novo</button></div>`;
+    <button class="btn btn-primary lg-btn" onclick="location.reload()">Tentar de novo</button>
+    <p class="lg-txt" style="margin-top:12px">Não resolveu? Abra o <a class="lg-link" href="diagnostico.html" target="_blank" rel="noopener">diagnóstico de conexão</a>, clique em <strong>Executar</strong> e envie o relatório a quem cuida da ferramenta.</p>
+    <details style="margin-top:8px;font-size:12px"><summary style="cursor:pointer">Detalhes técnicos</summary><pre style="white-space:pre-wrap;word-break:break-word;margin:6px 0 0">${acessoEsc(onlineDetalhesTecnicos(msg))}</pre></details></div>`;
 }
 
 let concluirLoginOriginal = null;
@@ -7643,7 +7651,7 @@ function onlineMostrarLogin(modo, perfil){
       <p class="lg-txt">Olá, <strong>${acessoEsc((perfil&&perfil.nome)||'')}</strong>. Sua conta foi criada, mas o administrador ainda não liberou o seu acesso. Avise-o para ativar a conta e definir suas permissões.</p>
       <button class="btn lg-btn" onclick="sair()">Sair</button>`;
   }
-  ov.innerHTML = `<div class="lg-card">${cab}${corpo}</div>`;
+  ov.innerHTML = `<div class="lg-card">${cab}${corpo}<div style="margin-top:10px;font-size:10px;color:#999;text-align:center">versão ${APP_BUILD}</div></div>`;
   setTimeout(()=>{ const f = ov.querySelector('input'); if(f) f.focus(); }, 30);
 }
 async function onlineEnviarLogin(ev){
@@ -7940,8 +7948,12 @@ async function supabaseSondarServidor(url, key){
     return {ok:true, status:r.status};
   }catch(e){ return {ok:false, tipo:'rede', erro:String((e&&e.message)||e)}; }
 }
+const SUPABASE_FIM_DICA = ' Se não resolver, abra o diagnóstico de conexão (o arquivo diagnostico.html, no mesmo endereço deste site), clique em Executar e envie o relatório a quem cuida da ferramenta.';
 function supabaseExplicarSonda(sonda, url){
   const host = url.replace(/^https?:\/\//,'');
+  return supabaseExplicarSonda2(sonda, host) + SUPABASE_FIM_DICA;
+}
+function supabaseExplicarSonda2(sonda, host){
   if(sonda.tipo==='chave') return `O servidor ${host} respondeu, mas recusou a chave do config.js. Confira se você copiou a chave "anon public" completa (Project Settings → API) e se ela é do MESMO projeto da URL.`;
   if(sonda.tipo==='servidor') return `O servidor ${host} respondeu com erro ${sonda.status}. Se o projeto estiver pausado, abra o painel do Supabase e clique em "Restore project"; se foi criado agora, aguarde alguns minutos.`;
   const offline = (typeof navigator!=='undefined' && navigator.onLine===false);

@@ -112,6 +112,20 @@ Só depois do passo 7 (administrador criado) as outras pessoas podem usar.
   produção (só administrador). Nesses casos a tela volta ao valor correto e avisa.
 - **Gerar plano** é uma ação que mexe em muitas linhas: evite que duas pessoas gerem o plano ao mesmo tempo.
 
+## Funciona para mim, mas outras pessoas não conseguem entrar
+Use a página de **diagnóstico**, que já vem no pacote (`diagnostico.html`):
+1. Peça para a pessoa abrir, **no navegador dela**, o endereço do seu site com `diagnostico.html` no final, por exemplo
+   `https://SEU-USUARIO.github.io/NOME-DO-REPOSITORIO/diagnostico.html`.
+2. Clicar em **Executar diagnóstico** (leva até 20 segundos) e depois em **Copiar relatório**.
+3. Enviar o relatório para você. Ele diz, passo a passo, o que falha: a versão publicada da ferramenta, se o `config.js` e o
+   `supabase.js` estão no GitHub, se a URL e a chave estão certas, se o servidor responde, se o login e as tabelas existem
+   e se o tempo real abre. (A chave aparece abreviada no relatório.)
+
+Causas frequentes, em ordem: **cópia antiga em cache** (peça Ctrl+F5 ou uma janela anônima; o relatório mostra a versão),
+**`config.js` publicado diferente do que você usa** (o relatório mostra se está em branco), arquivo **`supabase.js` ou
+`config.js` que não subiu** ao GitHub, e só então bloqueio de rede (teste também pelo celular em 4G/5G).
+A tela de erro da ferramenta também mostra "Detalhes técnicos" (versão, endereço da página e do servidor) para copiar.
+
 ## Problemas comuns
 | O que aparece | Causa provável | O que fazer |
 |---|---|---|
