@@ -27,10 +27,30 @@ Tempo estimado: 20 a 30 minutos. Você precisa de uma conta no GitHub e uma no S
 3. **Authentication → URL Configuration → Site URL**: coloque o endereço onde a ferramenta vai ficar
    (ex.: `https://SEU-USUARIO.github.io/planejamento-producao/`). É para onde levam os links de "Esqueci a senha".
 
-## 4. Conferir o tempo real
-O `schema.sql` já liga o tempo real nas tabelas certas. Para conferir: **Database → Publications →
-supabase_realtime** deve listar as tabelas `registros` e `perfis`. (Depois você também confere pelo botão
-"Testar conexão" da ferramenta.)
+## 4. Ligar e conferir o tempo real (é o que faz as alterações aparecerem para os outros sem recarregar)
+O `schema.sql` já tenta ligar o tempo real nas tabelas certas. **Confira**, rodando no **SQL Editor**:
+```sql
+select tablename from public.pg_publication_tables where pubname = 'supabase_realtime';
+```
+O resultado deve listar **`registros`** e **`perfis`**. Se não listar (ou se vier vazio), rode estas duas linhas:
+```sql
+alter publication supabase_realtime add table public.registros;
+alter publication supabase_realtime add table public.perfis;
+```
+(Se aparecer "already member of publication", já estava ligado.) No painel, o mesmo ajuste aparece em
+*Database → Publications → supabase_realtime* ou, na tabela, no botão de **Realtime** do *Table Editor* — os nomes podem
+mudar conforme a versão do painel.
+
+> **Se o tempo real não estiver funcionando, a ferramenta continua compartilhada**: ela percebe sozinha e passa a buscar
+> as mudanças dos outros a cada poucos segundos (a barra lateral mostra "● Online · atualiza a cada 5 s"). Só não é
+> instantâneo. Depois de ligar o tempo real, volta ao normal sozinha.
+
+### Teste de simultaneidade (2 minutos)
+1. Abra a ferramenta em **dois navegadores diferentes** (ou um normal e uma janela anônima), cada um com **uma conta diferente** (ambas liberadas, com "Edição" na Lista Mestre).
+2. Na barra lateral, os dois devem mostrar **"● Online · 2 conectados"**. (O "2 conectados" também depende do tempo real: se mostrar só 1, ele não está funcionando.)
+3. No navegador 1, abra **Lista Mestre**, escolha uma linha e digite algo no campo **Nº OP**. Saia do campo.
+4. No navegador 2, o valor deve aparecer **sozinho**, em instantes, e um aviso "🔄 Fulano atualizou 1 registro".
+5. Se não aparecer, clique em **"● Online"** na barra lateral (atualiza na hora) e rode **Usuários e Permissões → 🩺 Testar conexão**.
 
 ## 5. Copiar a URL e a chave
 **Project Settings → API**:
@@ -102,6 +122,8 @@ Só depois do passo 7 (administrador criado) as outras pessoas podem usar.
 | A tela abre, mas sem login online (parece o modo antigo) | `config.js` em branco, ou o arquivo errado foi enviado | Abra `https://SEU-SITE/config.js` no navegador: deve mostrar a sua URL e chave |
 | "Não foi possível ler os dados" no teste | O `schema.sql` não foi executado por inteiro, ou URL/chave de outro projeto | Rode o `schema.sql` de novo; confira o `config.js` |
 | "Tempo real" falha no teste | Tabelas fora da publicação, ou rede da empresa bloqueia WebSocket | Passo 4; teste em outra rede (celular) |
+| As alterações de uma pessoa só aparecem para a outra depois de um tempo, ou só ao recarregar | Tempo real desligado no Supabase (a ferramenta está usando a atualização de reserva), ou a outra pessoa tem só **leitura** | Passo 4 (SQL do Realtime) e 🩺 Testar conexão. Confira também se a outra conta tem **Edição** na tela |
+| "2 conectados" não aparece (mostra só você) | Tempo real/presença desligado | Passo 4 |
 | Conta criada, mas "Aguardando liberação" | É o esperado | O administrador libera em Usuários e Permissões |
 | "Confirme o e-mail primeiro" | "Confirm email" está ligado | Passo 3.2 (ou clique no link do e-mail) |
 | Link de "Esqueci a senha" abre página errada | Site URL incorreto | Passo 3.3 |

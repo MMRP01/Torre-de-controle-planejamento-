@@ -9,10 +9,6 @@
 // Estes dois valores PODEM ficar no GitHub (a chave "anon" é pública por desenho: quem protege os dados
 // é o login + as regras do servidor). NUNCA coloque aqui a chave "service_role".
 // =====================================================================================
-// ===================================================
-// Configuração do servidor — Torre de Controle de Produção
-// ... (várias linhas de explicação, todas começando com //)
-// ===================================================
 window.MENZOIL_CONFIG = {
   supabaseUrl: '',        // ex.: 'https://abcdefghijkl.supabase.co'
   supabaseAnonKey: ''     // ex.: 'eyJhbGciOi...'  (chave "anon public")

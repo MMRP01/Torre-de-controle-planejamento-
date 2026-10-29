@@ -1,0 +1,4 @@
+# backups e planilhas têm dados reais: nunca versionar
+menzoil_backup_*.json
+*.csv
+*.xlsx

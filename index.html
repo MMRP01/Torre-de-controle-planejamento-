@@ -7200,7 +7200,8 @@ const Sync = {
   ativo:false, backend:null, base:new Map(), seq:0, clienteId:'c'+Math.random().toString(36).slice(2,9),
   estado:'parado', msg:'', pendentes:0, enviando:false, reenviar:false, timer:null, tentativas:0, retry:null,
   filaRemota:[], filaTimer:null, renderTimer:null, tentRender:0, resumo:{n:0, por:new Set(), descartes:[]},
-  perfis:new Map(), presentes:[], desinscrever:[], pollTimer:null, semChave:0, perfisBase:new Map(), souAdmin:false,   // souAdmin = o que o SERVIDOR disse por último (a tela pode estar com a edição em andamento)
+  perfis:new Map(), presentes:[], desinscrever:[], pollTimer:null, semChave:0, perfisBase:new Map(), souAdmin:false,
+  realtimeOk:null, eventoEm:0, pollRapido:null, intervaloLento:30000, intervaloRapido:5000, esperaEco:5000, avisouRealtime:false,   // tempo real: confirmado (true), com defeito (false) ou ainda não sabido (null)   // souAdmin = o que o SERVIDOR disse por último (a tela pode estar com a edição em andamento)
 };
 
 /* ---------- instantâneo do DB atual e diferenças ---------- */
@@ -7282,12 +7283,13 @@ function syncRenderStatus(){
   const n = Sync.presentes.length, nomes = Sync.presentes.map(p=>p.nome||p.usuario).join(', ');
   const t = Sync.estado;
   let txt = '', cls = '';
-  if(t==='online'){ txt = `● Online${n?` · ${n} conectado${n>1?'s':''}`:''}`; cls = 'ok'; }
+  if(t==='online'){ txt = `● Online${n?` · ${n} conectado${n>1?'s':''}`:''}${Sync.realtimeOk===false?' · atualiza a cada '+Math.round(Sync.intervaloRapido/1000)+' s':''}`; cls = Sync.realtimeOk===false ? 'busy' : 'ok'; }
   else if(t==='sincronizando'){ txt = `↻ Sincronizando${Sync.pendentes?` (${Sync.pendentes})`:'…'}`; cls = 'busy'; }
   else if(t==='offline'){ txt = `⚠ Sem conexão${Sync.pendentes?` — ${Sync.pendentes} alteração(ões) aguardando`:''}`; cls = 'off'; }
   else if(t==='erro'){ txt = `⚠ ${Sync.msg||'Erro de sincronização'}`; cls = 'off'; }
   el.className = 'sync-status '+cls; el.textContent = txt; el.style.display = txt ? '' : 'none';
-  el.title = (nomes ? 'Conectados agora: '+nomes+'\n' : '') + (Sync.msg||'');
+  el.title = (nomes ? 'Conectados agora: '+nomes+'\n' : '') + (Sync.realtimeOk===false ? 'O tempo real do servidor não está chegando; a ferramenta busca as mudanças dos outros a cada poucos segundos. Peça ao administrador para rodar "Testar conexão".\n' : '') + 'Clique para atualizar agora.' + (Sync.msg?'\n'+Sync.msg:'');
+  el.style.cursor = 'pointer'; el.onclick = ()=>{ if(Sync.ativo){ syncResync(); showToast('Atualizando…'); } };
 }
 function syncAgendar(imediato){
   if(!Sync.ativo) return;
@@ -7299,11 +7301,12 @@ function syncAgendar(imediato){
 async function syncEnviar(){
   if(!Sync.ativo) return;
   if(Sync.enviando){ Sync.reenviar = true; return; }
-  Sync.enviando = true;
+  Sync.enviando = true; let enviouAlgo = false, inicioEnvio = 0;
   try{
     for(let rodada=0; rodada<8; rodada++){
       const ops = syncCalcularOps(); Sync.pendentes = ops.length;
       if(!ops.length) break;
+      if(!enviouAlgo){ enviouAlgo = true; inicioEnvio = Date.now(); }   // o aviso do servidor pode chegar ANTES da resposta: a contagem começa no início do envio
       syncDefinirEstado('sincronizando');
       let recarregar = false;
       for(let i=0; i<ops.length; i+=SYNC_LOTE){
@@ -7315,6 +7318,7 @@ async function syncEnviar(){
     }
     Sync.pendentes = 0; Sync.tentativas = 0; clearTimeout(Sync.retry);
     syncDefinirEstado('online');
+    if(enviouAlgo) syncVerificarEco(inicioEnvio);
   }catch(e){
     Sync.tentativas++;
     const semPerm = e && (e.code==='sem_permissao' || /sem_permissao/.test(String(e.message||'')));
@@ -7408,6 +7412,8 @@ function syncReceber(rows){
   return mudou;
 }
 function syncEnfileirar(row){
+  Sync.eventoEm = Date.now();                                                       // o tempo real está entregando eventos
+  if(Sync.realtimeOk!==true){ const estava = Sync.realtimeOk; Sync.realtimeOk = true; syncPararPollRapido(); if(estava===false){ showToast('✓ Tempo real restabelecido.'); } syncRenderStatus(); }
   if(row && String(row.chave).startsWith('__diag')){ if(Sync.diagEco) Sync.diagEco(row); return; }   // eco do teste de conexão: não é dado da ferramenta
   Sync.filaRemota.push(syncClonar(row));
   clearTimeout(Sync.filaTimer);
@@ -7415,13 +7421,30 @@ function syncEnfileirar(row){
 }
 async function syncResync(){            // pega o que houve desde a última sequência vista (reconexão, eventos perdidos)
   if(!Sync.ativo || Sync.enviando) return;
-  try{ const rows = await Sync.backend.carregarRegistros(Sync.seq); syncReceber(syncClonar(rows)||[]); if(Sync.estado==='offline') syncDefinirEstado('online'); }
+  try{
+    const rows = await Sync.backend.carregarRegistros(Sync.seq); const antes = Sync.eventoEm;
+    const n = syncReceber(syncClonar(rows)||[]); if(Sync.estado==='offline') syncDefinirEstado('online');
+    if(n>0 && Sync.eventoEm===antes && Sync.realtimeOk!==false) syncVerificarEco(Date.now()-1);   // chegaram mudanças de outras pessoas sem aviso de tempo real: confirma antes de concluir que ele falhou (o aviso pode estar só um instante atrasado)
+  }
   catch(e){ if(Sync.estado!=='sincronizando') syncDefinirEstado('offline'); }
 }
 async function syncRecarregarTudo(){    // descarta o que está aqui e baixa tudo de novo (usado quando uma gravação é recusada por permissão)
   const rows = syncClonar(await Sync.backend.carregarRegistros(0)) || [];
   syncMontarDB(rows); syncInvalidarCaches(); syncRenderAgora(true);
 }
+
+/* ---------- o tempo real não chega? então busca as mudanças dos outros a cada poucos segundos ---------- */
+function syncVerificarEco(t0){          // depois de gravar, o servidor deve "devolver" o evento pelo tempo real; se não voltar, o tempo real está com problema
+  setTimeout(()=>{ if(Sync.ativo && !Sync.diagEco && Sync.eventoEm < t0) syncRealtimeIndisponivel(); }, Sync.esperaEco);
+}
+function syncRealtimeIndisponivel(){
+  if(!Sync.ativo || Sync.realtimeOk===false) return;
+  Sync.realtimeOk = false;
+  clearInterval(Sync.pollRapido); Sync.pollRapido = setInterval(()=>{ if(!document.hidden) syncResync(); }, Sync.intervaloRapido);
+  if(!Sync.avisouRealtime){ Sync.avisouRealtime = true; showToast(`O tempo real do servidor não está chegando. Para você continuar vendo o trabalho dos outros, a ferramenta passou a atualizar a cada ${Math.round(Sync.intervaloRapido/1000)} segundos. Peça ao administrador para rodar "Testar conexão".`, 'error'); }
+  syncRenderStatus();
+}
+function syncPararPollRapido(){ clearInterval(Sync.pollRapido); Sync.pollRapido = null; }
 
 /* ---------- carga inicial ---------- */
 const SYNC_COLECOES_GRANDES = ['items','recipes','resources','orders','plan'];
@@ -7458,7 +7481,8 @@ async function syncIniciar(){
   Sync.desinscrever.push(Sync.backend.assinarRegistros(row=>syncEnfileirar(row)));
   if(Sync.backend.assinarPerfis) Sync.desinscrever.push(Sync.backend.assinarPerfis(p=>onlinePerfilRecebido(p)));
   if(Sync.backend.entrarPresenca) Sync.desinscrever.push(Sync.backend.entrarPresenca({usuario:USUARIO_ATUAL.usuario, nome:USUARIO_ATUAL.nome, id:USUARIO_ATUAL.id}, lista=>{ Sync.presentes = lista||[]; syncRenderStatus(); }));
-  clearInterval(Sync.pollTimer); Sync.pollTimer = setInterval(()=>{ if(!document.hidden) syncResync(); }, 60000);
+  Sync.realtimeOk = null; Sync.eventoEm = 0; Sync.avisouRealtime = false;
+  clearInterval(Sync.pollTimer); Sync.pollTimer = setInterval(()=>{ if(!document.hidden) syncResync(); }, Sync.intervaloLento);
   window.addEventListener('online', syncAoVoltarRede); window.addEventListener('offline', syncAoPerderRede);
   document.addEventListener('visibilitychange', syncAoVoltarAba);
   syncDefinirEstado('online');
@@ -7474,7 +7498,7 @@ function syncAoVoltarRede(){ syncAgendar(true); syncResync(); }
 function syncAoPerderRede(){ if(Sync.ativo) syncDefinirEstado('offline'); }
 function syncAoVoltarAba(){ if(!document.hidden && Sync.ativo) syncResync(); }
 async function syncParar(){
-  Sync.ativo = false; clearTimeout(Sync.timer); clearTimeout(Sync.retry); clearTimeout(Sync.filaTimer); clearTimeout(Sync.renderTimer); clearInterval(Sync.pollTimer);
+  Sync.ativo = false; clearTimeout(Sync.timer); clearTimeout(Sync.retry); clearTimeout(Sync.filaTimer); clearTimeout(Sync.renderTimer); clearInterval(Sync.pollTimer); syncPararPollRapido();
   Sync.desinscrever.splice(0).forEach(f=>{ try{ f&&f(); }catch(e){} });
   window.removeEventListener('online', syncAoVoltarRede); window.removeEventListener('offline', syncAoPerderRede); document.removeEventListener('visibilitychange', syncAoVoltarAba);
   Sync.filaRemota = []; Sync.presentes = []; syncDefinirEstado('parado');
@@ -7844,7 +7868,7 @@ async function onlineDiagnostico(){
   await passo('Tempo real (as alterações chegam aos outros navegadores)', async ()=>{
     const chegou = await Promise.race([eco, new Promise(r=>setTimeout(()=>r(false), 7000))]);
     Sync.diagEco = null;
-    if(!chegou) throw dica('O aviso em tempo real não chegou em 7 segundos.', 'No Supabase: Database → Replication (ou Publications) → supabase_realtime → marque as tabelas registros e perfis (o schema.sql já tenta fazer isso). Em Settings → API, confirme que o Realtime está ligado. Redes de empresa às vezes bloqueiam WebSocket (wss://).');
+    if(!chegou) throw dica('O aviso em tempo real não chegou em 7 segundos. (Enquanto isso, a ferramenta já se atualiza sozinha a cada poucos segundos, então o trabalho continua compartilhado — só não é instantâneo.)', 'No Supabase: Database → Replication (ou Publications) → supabase_realtime → marque as tabelas registros e perfis (o schema.sql já tenta fazer isso). Em Settings → API, confirme que o Realtime está ligado. Redes de empresa às vezes bloqueiam WebSocket (wss://).');
     return 'Tempo real funcionando (o aviso do seu próprio teste voltou do servidor).';
   });
   await passo('Limpeza do registro de teste', async ()=>{
@@ -8017,7 +8041,7 @@ async function criarBackendSupabase(cfg){
       const ch = client.channel('rt-registros-'+Sync.clienteId).on('postgres_changes', {event:'*', schema:'public', table:'registros'}, p=>{ if(p.new && p.new.colecao) cb(p.new); })
         .subscribe(status=>{
           if(status==='SUBSCRIBED'){ if(jaConectou) syncResync(); jaConectou = true; }      // reconectou: busca o que perdeu
-          if(status==='CHANNEL_ERROR' || status==='TIMED_OUT'){ if(Sync.ativo) syncDefinirEstado('offline'); }
+          if(status==='CHANNEL_ERROR' || status==='TIMED_OUT' || status==='CLOSED'){ if(Sync.ativo) syncRealtimeIndisponivel(); }   // o canal de tempo real falhou: usa a atualização periódica
         });
       canais.add(ch); return ()=>{ canais.delete(ch); client.removeChannel(ch); };
     },
